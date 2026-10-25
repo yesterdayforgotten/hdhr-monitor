@@ -424,3 +424,15 @@ func TestTrustedProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestNoAuth(t *testing.T) {
+	srv := newHarness(t, Config{NoAuth: true}).srv
+	r := httptest.NewRequest("GET", "/api/version", nil)
+	r.RemoteAddr = "172.18.0.1:40000"
+	r.Header.Set("X-Forwarded-For", "203.0.113.9")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("with auth off: %d, want 200", w.Code)
+	}
+}

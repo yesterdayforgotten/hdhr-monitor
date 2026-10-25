@@ -26,7 +26,7 @@ var proxyHeaders = []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-
 // authorized lets trusted requests through, asks the rest for a login, and
 // writes the refusal when it returns false.
 func (s *Server) authorized(w http.ResponseWriter, r *http.Request) bool {
-	if s.trusted(r) {
+	if s.cfg.NoAuth || s.trusted(r) {
 		return true
 	}
 	if s.cfg.Password == "" {

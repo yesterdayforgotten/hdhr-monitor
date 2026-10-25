@@ -45,6 +45,7 @@ needs a login (see [Access](#access)). The image runs on amd64 and arm64.
 | `HDHR_LISTEN` | `:8089` | Listen address |
 | `HDHR_PASSWORD` | unset | Password for access from outside your network; unset refuses it |
 | `HDHR_USERNAME` | `admin` | Username for that login |
+| `HDHR_AUTH` | `on` | `off` lets every request in, for when a proxy or firewall in front already limits who can connect |
 | `HDHR_TRUSTED_NETS` | private ranges | CIDRs that need no login |
 | `HDHR_TRUSTED_PROXIES` | none | Reverse proxy IPs or CIDRs whose `X-Forwarded-For` is believed |
 | `HDHR_LEASE` | `60s` | How long a tuner stays taken after its page stops polling |
@@ -94,9 +95,11 @@ Android keep the screen on properly), but not from the internet:
    </VirtualHost>
    ```
 
-2. **Trust the proxy** with `HDHR_TRUSTED_PROXIES` set to its address. The app
-   then judges each request by the client address the proxy reports, so home
-   users need no login and anyone else is still refused.
+2. **Let the proxy's requests in.** Either set `HDHR_AUTH=off` and leave access
+   to the proxy alone, or set `HDHR_TRUSTED_PROXIES` to the proxy's address so
+   the app also checks the client address the proxy reports. With Docker bridge
+   networking, the proxy shows up as Docker's gateway (in `172.16.0.0/12`), not
+   the host's own address.
 
 3. **Point the name at the proxy on your network** with a DNS override in your
    router, so phones at home connect directly instead of through your public

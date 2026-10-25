@@ -33,6 +33,9 @@ type Config struct {
 	// login. Everything else needs Username and Password, and is refused
 	// when no password is set.
 	TrustedNets []netip.Prefix
+	// NoAuth lets every request in, for when something in front (a LAN-only
+	// reverse proxy, a firewall) already decides who may connect.
+	NoAuth bool
 	// TrustedProxies are reverse proxies whose X-Forwarded-For is believed:
 	// a request through one is judged by the client address it reports, so
 	// LAN users of a LAN-only proxy need no login.

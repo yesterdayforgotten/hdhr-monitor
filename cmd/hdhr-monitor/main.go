@@ -12,6 +12,8 @@
 //	HDHR_TRUSTED_PROXIES comma-separated reverse proxy IPs or CIDRs whose
 //	                   X-Forwarded-For is believed, so LAN users coming
 //	                   through them need no login (default none)
+//	HDHR_AUTH          set to off to let every request in, when a proxy or
+//	                   firewall in front already limits who can connect
 //	HDHR_USERNAME      login for everything else (default admin)
 //	HDHR_PASSWORD      password for everything else; unset refuses it
 //	HDHR_GUIDE         set to 0 to not fetch network names and logos from
@@ -78,7 +80,7 @@ func main() {
 		httpSrv.Shutdown(shutdown)
 	}()
 
-	slog.Info("listening", "version", cfg.Version, "addr", listen, "devices", cfg.Hosts, "remote_login", cfg.Password != "")
+	slog.Info("listening", "version", cfg.Version, "addr", listen, "devices", cfg.Hosts, "auth", !cfg.NoAuth, "remote_login", cfg.Password != "")
 	if err := httpSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
@@ -97,6 +99,13 @@ func config(listen string) (server.Config, error) {
 		DataDir:     "/data",
 		Version:     version,
 		Guide:       os.Getenv("HDHR_GUIDE") != "0",
+	}
+	switch v := os.Getenv("HDHR_AUTH"); v {
+	case "", "on":
+	case "off":
+		cfg.NoAuth = true
+	default:
+		return cfg, fmt.Errorf("HDHR_AUTH %q: want on or off", v)
 	}
 	if cfg.Version == "" {
 		// Development build: every start is a new version.
