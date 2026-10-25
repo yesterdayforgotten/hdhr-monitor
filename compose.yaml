@@ -1,0 +1,17 @@
+services:
+  hdhr-monitor:
+    image: ghcr.io/yesterdayforgotten/hdhr-monitor:latest
+    container_name: hdhr-monitor
+    restart: unless-stopped
+    # Host networking lets the app see each browser's real address, which
+    # decides who needs a login. The page is then on port 8089 of this host.
+    network_mode: host
+    environment:
+      HDHR_DEVICES: 10.10.0.54 # comma-separated, one per HDHomeRun
+      # HDHR_PASSWORD: change-me # allows logins from outside your network
+      # HDHR_TRUSTED_PROXIES: 10.10.0.2 # a LAN-only reverse proxy, see README
+    volumes:
+      - hdhr-data:/data # favorites and the cached channel guide
+
+volumes:
+  hdhr-data:

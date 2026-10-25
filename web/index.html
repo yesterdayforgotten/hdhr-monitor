@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual">
+<title>HDHomeRun Monitor</title>
+<meta name="description" content="Live HDHomeRun signal for aiming an antenna">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path class="waves" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path class="mute" d="M16 9.5l5 5m0-5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3L5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="i-antenna" viewBox="0 0 24 24"><path d="M12 11v10M8 21h8M8.3 7.6a5 5 0 0 1 7.4 0M5.6 4.9a9 9 0 0 1 12.8 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="10.5" r="1.8" fill="currentColor"/></symbol>
+</svg>
+
+<header class="bar">
+  <span class="brand" aria-hidden="true"><svg><use href="#i-antenna"/></svg></span>
+  <div class="title">
+    <select id="device" aria-label="Device" hidden></select>
+    <span id="deviceName" class="device-name"></span>
+    <span class="conn-line"><span id="conn" class="conn"></span><span id="connText">Connecting…</span></span>
+  </div>
+  <button id="soundBtn" class="pill-btn" aria-pressed="false" title="Beep with signal quality">
+    <svg><use href="#i-sound"/></svg><span class="label">Sound</span>
+  </button>
+  <button id="menuBtn" class="icon-btn" aria-label="Settings"><svg><use href="#i-gear"/></svg></button>
+</header>
+
+<nav id="tunerTabs" class="tabs" aria-label="Tuners"></nav>
+
+<p id="offline" class="banner" hidden></p>
+
+<main id="panels"></main>
+
+<template id="panelTpl">
+  <section class="panel">
+    <div class="tuner-line">
+      <span class="tuner-label"></span>
+      <span class="user badge"></span>
+      <button class="fav-toggle" aria-pressed="false" title="Save as favorite">
+        <svg><use href="#i-star"/></svg><span class="label">Favorite</span>
+      </button>
+    </div>
+    <div class="station">
+      <button class="step prev" aria-label="Previous station"><svg><use href="#i-chev-l"/></svg></button>
+      <button class="station-btn" title="Choose a channel">
+        <span class="st-top"><span class="vch"></span><span class="aff"></span><span class="name"></span></span>
+        <span class="st-sub"><span class="rf"></span><span class="hint"></span></span>
+      </button>
+      <button class="step next" aria-label="Next station"><svg><use href="#i-chev-r"/></svg></button>
+    </div>
+    <div class="fav-strip"></div>
+    <div class="tiles">
+      <div class="stale-note"></div>
+      <div class="tile">
+        <span class="t-label">SNR quality <span class="trend"></span></span>
+        <span class="t-row">
+          <span class="t-val big">–</span>
+          <button class="peak" title="Tap to reset the peak"><span class="peak-k">Peak</span><span class="peak-text">–</span></button>
+        </span>
+        <span class="meter"><i class="m-snq"></i><b class="m-peak"></b></span>
+      </div>
+      <div class="tile">
+        <span class="t-label">Symbol quality</span>
+        <span class="t-val seq">–</span>
+        <span class="meter"><i class="m-seq"></i></span>
+      </div>
+      <div class="tile">
+        <span class="t-label">Strength</span>
+        <span class="t-val ss">–</span>
+        <span class="meter"><i class="m-ss"></i></span>
+      </div>
+      <div class="tile">
+        <span class="t-label">Errors / s</span>
+        <span class="t-val eps">–</span>
+        <span class="meter"><i class="m-eps"></i></span>
+      </div>
+    </div>
+    <div class="graph-card">
+      <div class="graph-wrap"><canvas class="graph"></canvas></div>
+      <div class="graph-bar">
+        <div class="seg ranges" role="group" aria-label="Graph range">
+          <button data-range="60">1m</button><button data-range="300">5m</button><button data-range="900">15m</button>
+        </div>
+        <button class="lines-btn chip" aria-pressed="false" title="Also graph signal strength">+ Strength</button>
+        <button class="info-btn chip" title="All readings for this tuner">Details</button>
+      </div>
+    </div>
+    <div class="actions"></div>
+  </section>
+</template>
+
+<div id="sheet" class="sheet tall" hidden>
+  <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-top">
+      <span class="grabber" aria-hidden="true"></span>
+      <div class="sheet-head">
+        <h2 id="sheetTitle">Change channel</h2>
+        <button class="icon-btn sheet-close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      </div>
+      <p id="sheetWarn" class="banner" hidden></p>
+      <label class="search">
+        <svg><use href="#i-search"/></svg>
+        <input id="search" type="search" placeholder="Search channels" autocomplete="off" aria-label="Search channels">
+      </label>
+    </div>
+    <ul id="channels" class="channels"></ul>
+    <form id="rfForm" class="rf-form">
+      <label for="rfInput">Tune by RF channel</label>
+      <input id="rfInput" type="number" inputmode="numeric" min="2" max="69" placeholder="28">
+      <button type="submit" class="primary">Tune</button>
+    </form>
+  </div>
+</div>
+
+<div id="info" class="sheet" hidden>
+  <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+    <div class="sheet-top">
+      <span class="grabber" aria-hidden="true"></span>
+      <div class="sheet-head">
+        <h2 id="infoTitle">Tuner details</h2>
+        <button class="icon-btn sheet-close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <dl id="infoDetails" class="details"></dl>
+    </div>
+  </div>
+</div>
+
+<div id="menu" class="sheet" hidden>
+  <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
+    <div class="sheet-top">
+      <span class="grabber" aria-hidden="true"></span>
+      <div class="sheet-head">
+        <h2 id="menuTitle">Settings</h2>
+        <button class="icon-btn sheet-close" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <div class="setting">
+        <span>Screen</span>
+        <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+          <button data-theme="auto">Auto</button><button data-theme="sun">Sun</button><button data-theme="dark">Dark</button>
+        </div>
+      </div>
+      <label class="setting"><span>Vibrate when signal is lost</span><input type="checkbox" class="switch" id="vibrateOpt"></label>
+      <label class="setting"><span>Keep screen on</span><input type="checkbox" class="switch" id="awakeOpt"></label>
+    </div>
+    <p id="awakeNote" class="note" hidden></p>
+    <div class="settings-group">
+      <dl id="deviceInfo" class="details"></dl>
+    </div>
+    <p class="note">App version <span id="version">–</span></p>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<video id="keepAwake" src="keepawake.webm" muted loop playsinline hidden></video>
+<script src="app.js"></script>
+</body>
+</html>
