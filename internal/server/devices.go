@@ -39,14 +39,16 @@ type device struct {
 	progAt   map[int64]time.Time
 
 	guide *guide // network names and logos
+	sink  *sink  // where held ATSC 3.0 tuners stream; nil when not measuring
 }
 
 // owner is a browser that has taken a tuner. The server holds the device lock
 // for it until it releases the tuner or stops polling for LeaseTTL.
 type owner struct {
-	client string
-	key    uint32
-	seen   time.Time
+	client    string
+	key       uint32
+	seen      time.Time
+	streaming bool // we pointed the tuner's stream at the sink
 }
 
 type snapshot struct {
@@ -148,8 +150,48 @@ func (d *device) getSnapshot(ctx context.Context) *snapshot {
 	d.mu.Unlock()
 	if snap.err == nil {
 		d.learnPrograms(ctx, snap)
+		d.measure(ctx, snap)
 	}
 	return snap
+}
+
+// measure streams each ATSC 3.0 station on a tuner we hold to the sink, so the
+// tuner reports its bitrate, and stops once the tuner is on an ATSC 1.0
+// channel, which reports its bitrate without streaming.
+func (d *device) measure(ctx context.Context, snap *snapshot) {
+	if d.sink == nil {
+		return
+	}
+	d.opMu.Lock()
+	defer d.opMu.Unlock()
+	for n, t := range snap.tuners {
+		d.mu.Lock()
+		o := d.owners[n]
+		d.mu.Unlock()
+		if o == nil {
+			continue
+		}
+		var target string
+		switch {
+		case t.Lock == "atsc3" && t.Target == "none":
+			var err error
+			if target, err = d.sink.target(d.dev.Host, d.cfg.StreamHost); err != nil {
+				slog.Warn("can't measure ATSC 3.0 bitrate", "device", d.id, "tuner", n, "err", err)
+				continue
+			}
+		case t.Locked && t.Lock != "atsc3" && o.streaming:
+			target = "none"
+		default:
+			continue
+		}
+		if _, err := d.dev.SetTarget(ctx, n, target, o.key); err != nil {
+			slog.Warn("couldn't set stream target", "device", d.id, "tuner", n, "target", target, "err", err)
+			continue
+		}
+		d.mu.Lock()
+		o.streaming = target != "none"
+		d.mu.Unlock()
+	}
 }
 
 func (d *device) readSnapshot(ctx context.Context) *snapshot {
@@ -322,6 +364,17 @@ func (d *device) tune(ctx context.Context, n int, req TuneRequest) error {
 	if err != nil {
 		return err
 	}
+	// A 3.0 tuner stops sending when it changes channel, and doesn't start
+	// again on its own; measure restarts the stream once the new channel locks.
+	d.mu.Lock()
+	streaming := o.streaming
+	o.streaming = false
+	d.mu.Unlock()
+	if streaming {
+		if _, err := d.dev.SetTarget(ctx, n, "none", o.key); err != nil {
+			slog.Warn("couldn't stop measurement stream", "device", d.id, "tuner", n, "err", err)
+		}
+	}
 	if req.VChannel != "" {
 		err = d.dev.TuneVirtual(ctx, n, req.VChannel, o.key)
 	} else {
@@ -421,8 +474,14 @@ func (d *device) release(ctx context.Context, n int, client string) error {
 func (d *device) releaseLocked(ctx context.Context, n int, o *owner) error {
 	d.mu.Lock()
 	delete(d.owners, n)
+	streaming := o.streaming
 	d.mu.Unlock()
 
+	if streaming {
+		if _, err := d.dev.SetTarget(ctx, n, "none", o.key); err != nil {
+			slog.Warn("couldn't stop measurement stream", "device", d.id, "tuner", n, "err", err)
+		}
+	}
 	err := d.dev.Untune(ctx, n, o.key)
 	if uerr := d.dev.Unlock(ctx, n, o.key); err == nil {
 		err = uerr

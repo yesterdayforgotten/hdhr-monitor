@@ -50,6 +50,16 @@ type Config struct {
 	// guide service, as the HDHomeRun apps do.
 	Guide bool
 
+	// Measure has ATSC 3.0 tuners held for a page stream their station to
+	// this server, which discards it, because that is the only time they
+	// report its bitrate. It costs that bitrate (several Mbps) of network
+	// traffic per tuner. StreamPort is the UDP port the streams arrive on,
+	// and StreamHost the address devices should send them to; empty works it
+	// out from the route to each device.
+	Measure    bool
+	StreamPort int
+	StreamHost string
+
 	// Version identifies the running build. Open pages reload when it
 	// changes.
 	Version string
@@ -60,6 +70,7 @@ type Server struct {
 	devices []*device
 	byID    map[string]*device
 	favs    *favorites
+	sink    *sink // nil unless cfg.Measure
 	mux     *http.ServeMux
 }
 
@@ -69,11 +80,17 @@ func New(cfg Config, web fs.FS) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{cfg: cfg, byID: map[string]*device{}, favs: favs, mux: http.NewServeMux()}
+	if cfg.Measure {
+		if s.sink, err = listenSink(cfg.StreamPort); err != nil {
+			return nil, err
+		}
+	}
 	for _, h := range cfg.Hosts {
 		if _, dup := s.byID[h]; dup {
 			continue
 		}
 		d := newDevice(h, &s.cfg)
+		d.sink = s.sink
 		s.devices = append(s.devices, d)
 		s.byID[d.id] = d
 	}
@@ -113,6 +130,9 @@ func (s *Server) Run(ctx context.Context) {
 			for _, d := range s.devices {
 				d.releaseAll(done)
 				d.dev.Close()
+			}
+			if s.sink != nil {
+				s.sink.close()
 			}
 			return
 		case <-tick.C:
@@ -278,6 +298,10 @@ func (s *Server) status(ctx context.Context, d *device, client string) statusJSO
 			Target:          t.Target,
 			LockedBy:        t.LockedBy,
 			State:           "free",
+		}
+		if t.Lock == "atsc3" {
+			// 3.0 tuners leave ts: at zero; what they send is the station.
+			tj.StreamBPS = t.NetBPS
 		}
 		if t.VChannel != "none" {
 			tj.VChannel, tj.Name = t.VChannel, names[t.VChannel]

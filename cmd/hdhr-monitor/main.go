@@ -20,6 +20,12 @@
 //	                   Silicondust's guide service (default on)
 //	HDHR_DATA_DIR      where favorites are saved (default /data; empty keeps
 //	                   them in memory)
+//	HDHR_MEASURE       set to 0 to not stream held ATSC 3.0 tuners to the
+//	                   server, which is how their bitrate is measured
+//	                   (default on)
+//	HDHR_STREAM_PORT   UDP port those streams arrive on (default 8089)
+//	HDHR_STREAM_HOST   address devices send them to (default: this host's
+//	                   address on the route to each device)
 package main
 
 import (
@@ -32,6 +38,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -80,7 +87,7 @@ func main() {
 		httpSrv.Shutdown(shutdown)
 	}()
 
-	slog.Info("listening", "version", cfg.Version, "addr", listen, "devices", cfg.Hosts, "auth", !cfg.NoAuth, "remote_login", cfg.Password != "")
+	slog.Info("listening", "version", cfg.Version, "addr", listen, "devices", cfg.Hosts, "auth", !cfg.NoAuth, "remote_login", cfg.Password != "", "measure_atsc3", cfg.Measure)
 	if err := httpSrv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
@@ -99,6 +106,9 @@ func config(listen string) (server.Config, error) {
 		DataDir:     "/data",
 		Version:     version,
 		Guide:       os.Getenv("HDHR_GUIDE") != "0",
+		Measure:     os.Getenv("HDHR_MEASURE") != "0",
+		StreamPort:  8089,
+		StreamHost:  os.Getenv("HDHR_STREAM_HOST"),
 	}
 	switch v := os.Getenv("HDHR_AUTH"); v {
 	case "", "on":
@@ -117,6 +127,13 @@ func config(listen string) (server.Config, error) {
 	cfg.Hosts = list(os.Getenv("HDHR_DEVICES"))
 	if len(cfg.Hosts) == 0 {
 		return cfg, errors.New("set HDHR_DEVICES to your HDHomeRun IPs, for example HDHR_DEVICES=10.10.0.54")
+	}
+	if v := os.Getenv("HDHR_STREAM_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return cfg, fmt.Errorf("HDHR_STREAM_PORT %q: want a port number", v)
+		}
+		cfg.StreamPort = p
 	}
 	if v := os.Getenv("HDHR_LEASE"); v != "" {
 		d, err := time.ParseDuration(v)

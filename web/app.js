@@ -49,6 +49,7 @@ const prefs = {
   awake: load(localStorage, "hdhr-awake", true),
   range: load(localStorage, "hdhr-range", 60),
   allLines: load(localStorage, "hdhr-all-lines", false),
+  graphRate: load(localStorage, "hdhr-graph-rate", false),
   device: load(localStorage, "hdhr-device", null),
   view: load(localStorage, "hdhr-view", 0),
 };
@@ -182,6 +183,7 @@ function recordSample(t) {
     snq: t.snq,
     ss: t.strength,
     seq: t.symbolQuality,
+    bps: bitrate(t)?.mbps ?? null,
     locked: t.locked,
     eps,
     freq: t.frequency,
@@ -239,11 +241,24 @@ function smoothed(tuner, field) {
   for (let i = hist.length - 1; i >= 0; i--) {
     const s = hist[i];
     if (s.t < last.t - SMOOTH_MS || s.freq !== last.freq) break;
-    if (field !== "eps" && !s.locked) continue;
+    if ((field !== "eps" && !s.locked) || typeof s[field] !== "number") continue;
     sum += s[field];
     n++;
   }
   return n ? sum / n : null;
+}
+
+// Bitrate of the tuned station in Mbps. ATSC 1.0 tuners count the station's
+// own program whether or not anything is streaming it, or the whole RF
+// channel when tuned by RF number. ATSC 3.0 tuners only report it while
+// streaming the station: the server streams the ones a page holds to itself
+// to measure them, and other apps' streams count too.
+function bitrate(t) {
+  if (!t || !t.locked) return null;
+  if (t.lock === "atsc3") return t.streamBps > 0 ? { mbps: t.streamBps / 1e6, whole: false } : null;
+  if (t.streamBps > 0) return { mbps: t.streamBps / 1e6, whole: false };
+  if (t.deviceBps > 0) return { mbps: t.deviceBps / 1e6, whole: true };
+  return null;
 }
 
 // Rising, falling or steady: the last two seconds against the two before.
@@ -346,6 +361,10 @@ function buildPanels() {
       setPref("allLines", !prefs.allLines);
       renderAll();
     });
+    $(".rate-btn", el).addEventListener("click", () => {
+      setPref("graphRate", !prefs.graphRate);
+      renderAll();
+    });
     // In the dual view, tapping a panel picks which tuner the sound follows.
     el.addEventListener("click", (e) => {
       if (prefs.view !== "both" || e.target.closest("button, summary, details")) return;
@@ -446,6 +465,7 @@ function renderPanel(p) {
     big.textContent = "–";
     big.className = "t-val big";
     trendEl.textContent = "";
+    $(".rate", el).textContent = "";
     for (const m of el.querySelectorAll(".meter i")) m.style.width = "0";
     renderActions(p, null);
     drawGraph(p);
@@ -498,6 +518,19 @@ function renderPanel(p) {
     meter(el, "snq", shown, quality(shown));
   }
 
+  const rateEl = $(".rate", el);
+  const br = bitrate(t);
+  if (br) {
+    const mbps = smoothed(p.tuner, "bps");
+    rateEl.textContent = (mbps === null ? br.mbps : mbps).toFixed(1) + " Mbps" + (br.whole ? " total" : "");
+    rateEl.title = br.whole ? "Whole RF channel, which carries several stations" : "Bitrate of this station";
+  } else if (t.locked && t.lock === "atsc3") {
+    rateEl.textContent = "ATSC 3.0";
+    rateEl.title = "An ATSC 3.0 tuner reports its bitrate only while streaming the station";
+  } else {
+    rateEl.textContent = "";
+  }
+
   const pk = state.peak[p.tuner];
   const peakText = $(".peak-text", el);
   $(".peak", el).hidden = !(pk && pk.freq === t.frequency && pk.value > 0 && t.locked);
@@ -542,6 +575,9 @@ function renderPanel(p) {
     b.setAttribute("aria-pressed", String(Number(b.dataset.range) === prefs.range));
   }
   $(".lines-btn", el).setAttribute("aria-pressed", String(prefs.allLines));
+  // Strength shares the 0–100 axis, which bitrate replaces.
+  $(".lines-btn", el).hidden = prefs.graphRate;
+  $(".rate-btn", el).setAttribute("aria-pressed", String(prefs.graphRate));
 
   if (state.infoTuner === p.tuner && !$("#info").hidden) renderDetails($("#info"), t);
   renderActions(p, t);
@@ -581,8 +617,8 @@ function renderDetails(el, t) {
     ["Strength", t.strength + "%"],
     ["SNR quality", t.snq + "%"],
     ["Symbol quality", t.symbolQuality + "%"],
-    ["Stream", (t.streamBps / 1e6).toFixed(2) + " Mbps"],
-    ["Raw", (t.deviceBps / 1e6).toFixed(2) + " Mbps"],
+    ["Station bitrate", (t.streamBps / 1e6).toFixed(2) + " Mbps"],
+    ["RF channel bitrate", (t.deviceBps / 1e6).toFixed(2) + " Mbps"],
     ["Transport errors", t.transportErrors],
     ["CRC errors", t.crcErrors],
     ["Streaming to", t.target],
@@ -1072,6 +1108,16 @@ function snrScale(p, hist, peak) {
   return p.scale;
 }
 
+// Top of the bitrate axis: a round number above the highest reading, so the
+// halfway label stays readable too.
+function rateScale(hist) {
+  let max = 0;
+  for (const s of hist) {
+    if (s.locked && typeof s.bps === "number") max = Math.max(max, s.bps);
+  }
+  return [2, 4, 6, 10, 12, 16, 20, 24, 30, 40, 50].find((v) => v >= max * 1.1) || Math.ceil(max / 10) * 10;
+}
+
 function drawGraph(p) {
   const canvas = $(".graph", p.el);
   const w = canvas.clientWidth;
@@ -1107,7 +1153,11 @@ function drawGraph(p) {
 
   const { lo, hi } = snrScale(p, hist, showPeak ? pk.value : null);
   const yL = (v) => padT + gh - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * gh;
-  const yR = (v) => padT + gh - (Math.max(0, Math.min(100, v)) / 100) * gh;
+  // The right axis is 0–100 for symbol quality and strength, or 0 up to a
+  // round number above the highest bitrate shown.
+  const rate = prefs.graphRate;
+  const rMax = rate ? rateScale(hist) : 100;
+  const yR = (v) => padT + gh - (Math.max(0, Math.min(rMax, v)) / rMax) * gh;
 
   // Grid follows the SNR scale; the right axis labels its own 0–100.
   ctx.font = "11px system-ui, sans-serif";
@@ -1127,7 +1177,7 @@ function drawGraph(p) {
   }
   ctx.fillStyle = c.fair;
   ctx.textAlign = "right";
-  for (const v of [0, 50, 100]) ctx.fillText(String(v), w - 2, yR(v) + 4);
+  for (const v of [0, rMax / 2, rMax]) ctx.fillText(String(v), w - 2, yR(v) + 4);
 
   ctx.fillStyle = c.muted;
   ctx.textAlign = "center";
@@ -1144,9 +1194,9 @@ function drawGraph(p) {
   // Legend across the top: each line and which side its scale is on.
   const legend = [
     ["◂ SNR", c.text, 2.5, []],
-    ["Symbol ▸", c.fair, 2, []],
+    [rate ? "Mbps ▸" : "Symbol ▸", c.fair, 2, []],
   ];
-  if (prefs.allLines) legend.push(["Strength ▸", c.muted, 1.5, [4, 3]]);
+  if (prefs.allLines && !rate) legend.push(["Strength ▸", c.muted, 1.5, [4, 3]]);
   ctx.font = "600 11px system-ui, sans-serif";
   ctx.textAlign = "left";
   let lx = padL;
@@ -1208,11 +1258,12 @@ function drawGraph(p) {
     let open = false;
     for (let i = 0; i < hist.length; i++) {
       const s = hist[i];
-      // Break the line across gaps (page hidden, network loss) and no-lock
-      // stretches.
-      if (!s.locked || (i > 0 && s.t - hist[i - 1].t > 3000)) {
+      // Break the line across gaps (page hidden, network loss), no-lock
+      // stretches and readings without this field.
+      const missing = !s.locked || typeof s[field] !== "number";
+      if (missing || (i > 0 && s.t - hist[i - 1].t > 3000)) {
         open = false;
-        if (!s.locked) continue;
+        if (missing) continue;
       }
       if (open) ctx.lineTo(x(s.t), y(s[field]));
       else ctx.moveTo(x(s.t), y(s[field]));
@@ -1220,8 +1271,8 @@ function drawGraph(p) {
     }
     ctx.stroke();
   };
-  if (prefs.allLines) line("ss", yR, c.muted, 1.5, [4, 3]);
-  line("seq", yR, c.fair, 2);
+  if (prefs.allLines && !rate) line("ss", yR, c.muted, 1.5, [4, 3]);
+  line(rate ? "bps" : "seq", yR, c.fair, 2);
   line("snq", yL, c.text, 3);
   ctx.restore();
   ctx.setLineDash([]);

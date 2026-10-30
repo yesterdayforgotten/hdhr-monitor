@@ -51,6 +51,9 @@ needs a login (see [Access](#access)). The image runs on amd64 and arm64.
 | `HDHR_LEASE` | `60s` | How long a tuner stays taken after its page stops polling |
 | `HDHR_GUIDE` | on | `0` stops fetching network names and logos from Silicondust's guide service |
 | `HDHR_DATA_DIR` | `/data` | Where favorites and the guide cache are saved |
+| `HDHR_MEASURE` | on | `0` stops measuring ATSC 3.0 bitrate (see [ATSC 3.0](#atsc-30)) |
+| `HDHR_STREAM_PORT` | `8089` | UDP port the measurement streams arrive on |
+| `HDHR_STREAM_HOST` | found per device | Address the HDHomeRun should send them to |
 
 ## Tuners
 
@@ -61,6 +64,20 @@ page, or a minute after it stops polling (phone asleep, tab closed).
 A tuner already in use, by a TV app, a DVR or another phone, can be watched but
 not changed until you press and hold to take it, which cuts off whoever was
 using it.
+
+## ATSC 3.0
+
+ATSC 3.0 tuners (FLEX 4K, CONNECT 4K) report a station's bitrate only while
+streaming it. So while a page holds a 3.0 tuner, the app has the tuner stream
+the station to the app, which counts it and throws it away. That's the
+station's bitrate in network traffic (a few Mbps) per tuner, only while a page
+is watching it; `HDHR_MEASURE=0` turns it off. ATSC 1.0 stations need none of
+this.
+
+The HDHomeRun has to reach the app on UDP port 8089. With host networking it
+does, and the app works out its own address. Behind Docker's bridge network,
+publish the port (`8089:8089/udp`) and set `HDHR_STREAM_HOST` to the Docker
+host's address.
 
 ## Access
 

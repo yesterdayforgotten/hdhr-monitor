@@ -25,6 +25,7 @@ type Channel struct {
 	VChannel  string
 	Name      string
 	Frequency int64 // Hz
+	ATSC3     bool
 }
 
 // Tuner is the fake state of one tuner.
@@ -51,12 +52,18 @@ type Device struct {
 	http *httptest.Server
 }
 
-// DefaultLineup is a small lineup with two stations on one frequency.
+// DefaultLineup is a small lineup with two stations on one frequency and one
+// ATSC 3.0 station.
 var DefaultLineup = []Channel{
-	{"2.1", "KUTV2", 593_000_000},
-	{"13.1", "KSTU-HD", 557_000_000},
-	{"13.2", "ION", 557_000_000},
+	{"2.1", "KUTV2", 593_000_000, false},
+	{"13.1", "KSTU-HD", 557_000_000, false},
+	{"13.2", "ION", 557_000_000, false},
+	{"102.1", "KUTV", 503_000_000, true},
 }
+
+// ATSC3StreamBPS is what a fake ATSC 3.0 tuner reports sending while it
+// streams.
+const ATSC3StreamBPS = 6_900_000
 
 // Start runs a fake with n idle tuners and DefaultLineup.
 func Start(n int) (*Device, error) {
@@ -284,17 +291,34 @@ func (d *Device) channel(value string) string {
 	return fmt.Sprintf("auto:%d", n)
 }
 
+// debug reports like a real tuner. ATSC 3.0 tuners count nothing in ts: and
+// only report a station's bitrate in net: while streaming it somewhere.
 func (d *Device) debug(t *Tuner) string {
-	lock := "none"
+	lock, netBPS := "none", 0
 	if t.Channel != "none" {
 		_, f, _ := strings.Cut(t.Channel, ":")
 		lock = "8vsb:" + f
+		if d.atsc3(t.Channel) {
+			lock = "atsc3:" + f
+			if t.Target != "none" {
+				netBPS = ATSC3StreamBPS
+			}
+		}
 	}
 	return fmt.Sprintf("tun: ch=%s lock=%s ss=%d snq=%d seq=%d dbg=0\n"+
 		"dev: bps=19392712 resync=0 overflow=0\n"+
 		"ts:  bps=0 te=%d crc=0\n"+
-		"net: pps=0 err=0 stop=0\n",
-		t.Channel, lock, t.Strength, t.SNQ, t.SymbolQuality, t.TransportErrors)
+		"net: bps=%d pps=0 err=0 stop=0\n",
+		t.Channel, lock, t.Strength, t.SNQ, t.SymbolQuality, t.TransportErrors, netBPS)
+}
+
+func (d *Device) atsc3(channel string) bool {
+	for _, c := range d.Lineup {
+		if c.ATSC3 && channel == fmt.Sprintf("auto:%d", c.Frequency) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Device) tuner(name string) (*Tuner, string, error) {

@@ -146,7 +146,7 @@ func TestDeviceInfoAndLineup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lineup) != 3 || lineup[1].GuideNumber != "13.1" {
+	if len(lineup) != 4 || lineup[1].GuideNumber != "13.1" {
 		t.Errorf("Lineup = %+v", lineup)
 	}
 }

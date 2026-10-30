@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -47,6 +49,9 @@ func newHarness(t *testing.T, cfg Config) *harness {
 	}
 	srv.devices[0].dev.SetHTTPBase(fake.HTTPBase())
 	t.Cleanup(func() { srv.devices[0].dev.Close() })
+	if srv.sink != nil {
+		t.Cleanup(srv.sink.close)
+	}
 	return &harness{t: t, fake: fake, srv: srv, id: fake.Addr()}
 }
 
@@ -143,6 +148,70 @@ func TestTuneOwnershipAndRelease(t *testing.T) {
 	}
 	if got := h.status("b").Tuners[1].State; got != "free" {
 		t.Errorf("after release = %q, want free", got)
+	}
+}
+
+func TestMeasuresATSC3Bitrate(t *testing.T) {
+	h := newHarness(t, Config{Measure: true})
+	tune := func(vch string) {
+		t.Helper()
+		if code := h.do("POST", h.api("/tuners/0/tune"), TuneRequest{Client: "a", VChannel: vch}, nil); code != http.StatusOK {
+			t.Fatalf("tune %s: %d", vch, code)
+		}
+	}
+
+	// The status read after the tuner locks starts the stream; the next one
+	// shows what it sends.
+	tune("102.1")
+	h.status("a")
+	want := fmt.Sprintf("udp://127.0.0.1:%d", h.srv.sink.port)
+	if got := h.fake.Tuner(0).Target; got != want {
+		t.Fatalf("target = %q, want %q", got, want)
+	}
+	if tu := h.status("a").Tuners[0]; tu.Lock != "atsc3" || tu.StreamBPS != hdhrtest.ATSC3StreamBPS || tu.State != "yours" {
+		t.Errorf("tuner 0 = %+v", tu)
+	}
+
+	// Retuning stops the stream before changing channel (a real 3.0 tuner
+	// stops sending anyway) and restarts it once the new channel locks, which
+	// the fake does at once.
+	h.fake.Mu.Lock()
+	from := len(h.fake.Requests)
+	h.fake.Mu.Unlock()
+	tune("102.1")
+	h.fake.Mu.Lock()
+	var sets []string
+	for _, r := range h.fake.Requests[from:] {
+		if strings.HasPrefix(r, "set /tuner0/") {
+			sets = append(sets, r)
+		}
+	}
+	h.fake.Mu.Unlock()
+	wantSets := []string{"set /tuner0/target none", "set /tuner0/vchannel 102.1", "set /tuner0/target " + want}
+	if strings.Join(sets, "\n") != strings.Join(wantSets, "\n") {
+		t.Errorf("retune sets =\n%s\nwant\n%s", strings.Join(sets, "\n"), strings.Join(wantSets, "\n"))
+	}
+
+	// An ATSC 1.0 channel reports its bitrate itself, so no stream.
+	tune("13.1")
+	h.status("a")
+	if got := h.fake.Tuner(0).Target; got != "none" {
+		t.Errorf("target on ATSC 1.0 = %q, want none", got)
+	}
+
+	tune("102.1")
+	h.status("a")
+	h.do("POST", h.api("/tuners/0/release"), releaseRequest{Client: "a"}, nil)
+	if got := h.fake.Tuner(0); got.Target != "none" || got.Channel != "none" || got.LockKey != 0 {
+		t.Errorf("after release, device tuner 0 = %+v", got)
+	}
+}
+
+func TestNoMeasuringUnlessAsked(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.do("POST", h.api("/tuners/0/tune"), TuneRequest{Client: "a", VChannel: "102.1"}, nil)
+	if tu := h.status("a").Tuners[0]; tu.Lock != "atsc3" || tu.StreamBPS != 0 || h.fake.Tuner(0).Target != "none" {
+		t.Errorf("tuner 0 = %+v, device target %q", tu, h.fake.Tuner(0).Target)
 	}
 }
 
